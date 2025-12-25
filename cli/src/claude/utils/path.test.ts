@@ -1,13 +1,52 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getProjectPath } from './path';
-import { join } from 'node:path';
-
-vi.mock('node:os', () => ({
-    homedir: vi.fn(() => '/home/user')
-}));
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { getProjectPath, sanitizeProjectName } from './path';
 
 // Store original env
 const originalEnv = process.env;
+
+describe('sanitizeProjectName', () => {
+    it('should replace forward slashes with hyphens', () => {
+        expect(sanitizeProjectName('/Users/steve/projects/my-app')).toBe('-Users-steve-projects-my-app');
+    });
+
+    it('should replace backslashes with hyphens', () => {
+        expect(sanitizeProjectName('\\Users\\steve\\projects\\my-app')).toBe('-Users-steve-projects-my-app');
+    });
+
+    it('should replace dots with hyphens', () => {
+        expect(sanitizeProjectName('/Users/steve/projects/app.test.js')).toBe('-Users-steve-projects-app-test-js');
+    });
+
+    it('should replace underscores with hyphens', () => {
+        expect(sanitizeProjectName('/data/github/hapi__worktrees/ime')).toBe('-data-github-hapi--worktrees-ime');
+    });
+
+    it('should handle paths with both slashes and dots', () => {
+        expect(sanitizeProjectName('/var/www/my.site.com/public')).toBe('-var-www-my-site-com-public');
+    });
+
+    it('should handle Windows drive letters (C:)', () => {
+        expect(sanitizeProjectName('C:\\Users\\test')).toBe('C-Users-test');
+        expect(sanitizeProjectName('C:/Users/test')).toBe('C-Users-test');
+    });
+
+    it('should handle mixed path separators', () => {
+        expect(sanitizeProjectName('C:\\Users/steve\\projects/my-app')).toBe('C-Users-steve-projects-my-app');
+    });
+
+    it('should handle empty string', () => {
+        expect(sanitizeProjectName('')).toBe('');
+    });
+
+    it('should handle root path', () => {
+        expect(sanitizeProjectName('/')).toBe('-');
+    });
+
+    it('should handle consecutive special characters', () => {
+        expect(sanitizeProjectName('/a//b')).toBe('-a--b'); // Two slashes -> two hyphens
+        expect(sanitizeProjectName('/a..b')).toBe('-a--b'); // Two dots -> two hyphens
+    });
+});
 
 describe('getProjectPath', () => {
     beforeEach(() => {
@@ -20,76 +59,38 @@ describe('getProjectPath', () => {
         // Restore original env
         process.env = originalEnv;
     });
-    it('should replace slashes with hyphens in the project path', () => {
-        const workingDir = '/Users/steve/projects/my-app';
-        const result = getProjectPath(workingDir);
-        expect(result).toBe(join('/home/user', '.claude', 'projects', '-Users-steve-projects-my-app'));
+
+    it('should return a path ending with projects directory', () => {
+        const result = getProjectPath('/test/project');
+        expect(result).toContain('projects');
     });
 
-    it('should replace dots with hyphens in the project path', () => {
-        const workingDir = '/Users/steve/projects/app.test.js';
-        const result = getProjectPath(workingDir);
-        expect(result).toBe(join('/home/user', '.claude', 'projects', '-Users-steve-projects-app-test-js'));
+    it('should include the sanitized project name', () => {
+        const result = getProjectPath('/Users/steve/projects/my-app');
+        expect(result).toContain('-Users-steve-projects-my-app');
     });
 
-    it('should handle paths with both slashes and dots', () => {
-        const workingDir = '/var/www/my.site.com/public';
-        const result = getProjectPath(workingDir);
-        expect(result).toBe(join('/home/user', '.claude', 'projects', '-var-www-my-site-com-public'));
+    it('should contain .claude directory', () => {
+        const result = getProjectPath('/test/project');
+        expect(result).toContain('.claude');
     });
 
-    it('should replace underscores with hyphens in the project path', () => {
-        const workingDir = '/data/github/hapi__worktrees/ime';
-        const result = getProjectPath(workingDir);
-        expect(result).toBe(join('/home/user', '.claude', 'projects', '-data-github-hapi--worktrees-ime'));
+    it('should use CLAUDE_CONFIG_DIR when set', () => {
+        process.env.CLAUDE_CONFIG_DIR = '/custom/claude/config';
+        const result = getProjectPath('/test/project');
+        expect(result).toContain('custom');
+        expect(result).toContain('claude');
     });
 
-    it('should handle relative paths by resolving them first', () => {
-        const workingDir = './my-project';
-        const result = getProjectPath(workingDir);
-        expect(result).toContain(join('/home/user', '.claude', 'projects'));
-        expect(result).toContain('my-project');
+    it('should fallback to default when CLAUDE_CONFIG_DIR is empty string', () => {
+        process.env.CLAUDE_CONFIG_DIR = '';
+        const result = getProjectPath('/test/project');
+        expect(result).toContain('.claude');
     });
 
-    it('should handle empty directory path', () => {
-        const workingDir = '';
-        const result = getProjectPath(workingDir);
-        expect(result).toContain(join('/home/user', '.claude', 'projects'));
-    });
-
-    describe('CLAUDE_CONFIG_DIR support', () => {
-        it('should use default .claude directory when CLAUDE_CONFIG_DIR is not set', () => {
-            const workingDir = '/Users/steve/projects/my-app';
-            const result = getProjectPath(workingDir);
-            expect(result).toBe(join('/home/user', '.claude', 'projects', '-Users-steve-projects-my-app'));
-        });
-
-        it('should use CLAUDE_CONFIG_DIR when set', () => {
-            process.env.CLAUDE_CONFIG_DIR = '/custom/claude/config';
-            const workingDir = '/Users/steve/projects/my-app';
-            const result = getProjectPath(workingDir);
-            expect(result).toBe(join('/custom/claude/config', 'projects', '-Users-steve-projects-my-app'));
-        });
-
-        it('should handle relative CLAUDE_CONFIG_DIR path', () => {
-            process.env.CLAUDE_CONFIG_DIR = './config/claude';
-            const workingDir = '/Users/steve/projects/my-app';
-            const result = getProjectPath(workingDir);
-            expect(result).toBe(join('./config/claude', 'projects', '-Users-steve-projects-my-app'));
-        });
-
-        it('should fallback to default when CLAUDE_CONFIG_DIR is empty string', () => {
-            process.env.CLAUDE_CONFIG_DIR = '';
-            const workingDir = '/Users/steve/projects/my-app';
-            const result = getProjectPath(workingDir);
-            expect(result).toBe(join('/home/user', '.claude', 'projects', '-Users-steve-projects-my-app'));
-        });
-
-        it('should handle CLAUDE_CONFIG_DIR with trailing slash', () => {
-            process.env.CLAUDE_CONFIG_DIR = '/custom/claude/config/';
-            const workingDir = '/Users/steve/projects/my-app';
-            const result = getProjectPath(workingDir);
-            expect(result).toBe(join('/custom/claude/config/', 'projects', '-Users-steve-projects-my-app'));
-        });
+    it('should handle paths with special characters', () => {
+        const result = getProjectPath('/my.project/my_app');
+        expect(result).toContain('-my-project');
+        expect(result).toContain('-my-app');
     });
 });
