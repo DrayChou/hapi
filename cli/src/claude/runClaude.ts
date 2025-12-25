@@ -321,7 +321,7 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
                     archivedBy: 'cli',
                     archiveReason: 'User terminated'
                 }));
-                
+
                 // Send session death message
                 session.sendSessionDeath();
                 await session.flush();
@@ -344,8 +344,13 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     };
 
     // Handle termination signals
-    process.on('SIGTERM', cleanup);
+    const isWindows = process.platform === 'win32';
     process.on('SIGINT', cleanup);
+
+    // On Unix-like systems, also handle SIGTERM
+    if (!isWindows) {
+        process.on('SIGTERM', cleanup);
+    }
 
     // Handle uncaught exceptions and rejections
     process.on('uncaughtException', (error) => {

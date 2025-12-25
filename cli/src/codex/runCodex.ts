@@ -167,8 +167,12 @@ export async function runCodex(opts: {
         }
     };
 
-    process.on('SIGTERM', () => cleanup(0));
     process.on('SIGINT', () => cleanup(0));
+
+    // On Unix-like systems, also handle SIGTERM
+    if (process.platform !== 'win32') {
+        process.on('SIGTERM', () => cleanup(0));
+    }
 
     process.on('uncaughtException', (error) => {
         logger.debug('[codex] Uncaught exception:', error);

@@ -32,3 +32,6 @@ coverage/
 .claude/settings.local.json
 localdocs/
 execplan/
+
+# Spec workflow
+.spec-workflow

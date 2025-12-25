@@ -45,6 +45,7 @@ function getPlatformDir(): string {
         if (archName === 'x64') return 'x64-linux';
     } else if (platformName === 'win32') {
         if (archName === 'x64') return 'x64-win32';
+        if (archName === 'arm64') return 'arm64-win32';
     }
 
     throw new Error(`Unsupported platform: ${archName}-${platformName}`);
