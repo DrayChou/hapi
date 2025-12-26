@@ -12,35 +12,12 @@ import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquireDaemonLock, releaseDaemonLock } from '@/persistence';
+import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 
 import { cleanupDaemonState, getInstalledCliMtimeMs, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
 import { join } from 'path';
 import { runtimePath } from '@/projectPath';
-import spawn from 'cross-spawn';
-
-// Cross-platform process kill helper
-function killProcess(pid: number, signal?: string): boolean {
-  const isWindows = process.platform === 'win32';
-
-  if (isWindows) {
-    // Windows doesn't support Unix signals, use taskkill
-    try {
-      const result = spawn.sync('taskkill', ['/F', '/PID', pid.toString()], { stdio: 'pipe' });
-      return result.status === 0;
-    } catch {
-      return false;
-    }
-  } else {
-    // Unix-like systems support signals
-    try {
-      process.kill(pid, signal || 'SIGTERM');
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
 
 // Prepare initial metadata
 export const initialMachineMetadata: MachineMetadata = {
@@ -83,26 +60,20 @@ export async function startDaemon(): Promise<void> {
   });
 
   // Setup signal handlers
-  const isWindows = process.platform === 'win32';
-
-  // SIGINT works in Bun on Windows as well
   process.on('SIGINT', () => {
     logger.debug('[DAEMON RUN] Received SIGINT');
     requestShutdown('os-signal');
   });
 
-  // On Unix-like systems, SIGTERM is the standard termination signal
-  if (!isWindows) {
-    process.on('SIGTERM', () => {
-      logger.debug('[DAEMON RUN] Received SIGTERM');
+  process.on('SIGTERM', () => {
+    logger.debug('[DAEMON RUN] Received SIGTERM');
+    requestShutdown('os-signal');
+  });
+
+  if (isWindows()) {
+    process.on('SIGBREAK', () => {
+      logger.debug('[DAEMON RUN] Received SIGBREAK');
       requestShutdown('os-signal');
-    });
-  } else {
-    // On Windows, use beforeExit as fallback since SIGTERM doesn't work the same way
-    process.on('beforeExit', (code) => {
-      if (code !== 0) {
-        logger.debug(`[DAEMON RUN] Process exiting with code ${code}`);
-      }
     });
   }
 
@@ -399,21 +370,16 @@ export async function startDaemon(): Promise<void> {
 
           if (session.startedBy === 'daemon' && session.childProcess) {
             try {
-              if (isWindows) {
-                // On Windows, use taskkill for child processes
-                killProcess(session.childProcess.pid!);
-              } else {
-                session.childProcess.kill('SIGTERM');
-              }
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to daemon-spawned session ${sessionId}`);
+              void killProcessByChildProcess(session.childProcess);
+              logger.debug(`[DAEMON RUN] Requested termination for daemon-spawned session ${sessionId}`);
             } catch (error) {
               logger.debug(`[DAEMON RUN] Failed to kill session ${sessionId}:`, error);
             }
           } else {
             // For externally started sessions, try to kill by PID
             try {
-              killProcess(pid);
-              logger.debug(`[DAEMON RUN] Sent SIGTERM to external session PID ${pid}`);
+              void killProcess(pid);
+              logger.debug(`[DAEMON RUN] Requested termination for external session PID ${pid}`);
             } catch (error) {
               logger.debug(`[DAEMON RUN] Failed to kill external session PID ${pid}:`, error);
             }
@@ -509,11 +475,7 @@ export async function startDaemon(): Promise<void> {
 
       // Prune stale sessions
       for (const [pid, _] of pidToTrackedSession.entries()) {
-        try {
-          // Check if process is still alive (signal 0 doesn't kill, just checks)
-          process.kill(pid, 0);
-        } catch (error) {
-          // Process is dead, remove from tracking
+        if (!isProcessAlive(pid)) {
           logger.debug(`[DAEMON RUN] Removing stale session with PID ${pid} (process no longer exists)`);
           pidToTrackedSession.delete(pid);
         }
