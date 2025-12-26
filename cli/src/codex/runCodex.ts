@@ -131,7 +131,7 @@ export async function runCodex(opts: {
         messageQueue.push(message.content.text, enhancedMode);
     });
 
-    let sessionWrapper: CodexSession | null = null;
+    const sessionWrapperRef: { current: CodexSession | null } = { current: null };
 
     let cleanupStarted = false;
     let exitCode = 0;
@@ -153,6 +153,7 @@ export async function runCodex(opts: {
         logger.debug('[codex] Cleanup start');
         restoreTerminalState();
         try {
+            const sessionWrapper = sessionWrapperRef.current;
             if (sessionWrapper) {
                 sessionWrapper.stopKeepAlive();
             }
@@ -219,7 +220,7 @@ export async function runCodex(opts: {
                 }));
             },
             onSessionReady: (instance) => {
-                sessionWrapper = instance;
+                sessionWrapperRef.current = instance;
             }
         });
     } catch (error) {
@@ -228,7 +229,7 @@ export async function runCodex(opts: {
         archiveReason = 'Session crashed';
         logger.debug('[codex] Loop error:', error);
     } finally {
-        const localFailure = sessionWrapper?.localLaunchFailure;
+        const localFailure = sessionWrapperRef.current?.localLaunchFailure;
         if (localFailure?.exitReason === 'exit') {
             exitCode = 1;
             archiveReason = `Local launch failed: ${formatFailureReason(localFailure.message)}`;
