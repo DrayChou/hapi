@@ -2,6 +2,7 @@ import type { ToolCallBlock } from '@/chat/types'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
 import { memo, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { isObject, safeStringify } from '@hapi/protocol'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
@@ -9,43 +10,16 @@ import { DiffView } from '@/components/DiffView'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { PermissionFooter } from '@/components/ToolCard/PermissionFooter'
 import { AskUserQuestionFooter } from '@/components/ToolCard/AskUserQuestionFooter'
+import { RequestUserInputFooter } from '@/components/ToolCard/RequestUserInputFooter'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
+import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getToolFullViewComponent, getToolViewComponent } from '@/components/ToolCard/views/_all'
 import { getToolResultViewComponent } from '@/components/ToolCard/views/_results'
 import { usePointerFocusRing } from '@/hooks/usePointerFocusRing'
+import { getInputString, getInputStringAny, truncate } from '@/lib/toolInputUtils'
 import { cn } from '@/lib/utils'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
-
-function safeStringify(value: unknown): string {
-    try {
-        return JSON.stringify(value, null, 2)
-    } catch {
-        return String(value)
-    }
-}
-
-function getInputString(input: unknown, key: string): string | null {
-    if (!isObject(input)) return null
-    const value = input[key]
-    return typeof value === 'string' ? value : null
-}
-
-function getInputStringAny(input: unknown, keys: string[]): string | null {
-    for (const key of keys) {
-        const value = getInputString(input, key)
-        if (value) return value
-    }
-    return null
-}
-
-function truncate(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text
-    return text.slice(0, maxLen - 3) + '...'
-}
+import { useTranslation } from '@/lib/use-translation'
 
 const ELAPSED_INTERVAL_MS = 1000
 
@@ -310,6 +284,7 @@ type ToolCardProps = {
 }
 
 function ToolCardInner(props: ToolCardProps) {
+    const { t } = useTranslation()
     const presentation = useMemo(() => getToolPresentation({
         toolName: props.block.tool.name,
         input: props.block.tool.input,
@@ -337,6 +312,8 @@ function ToolCardInner(props: ToolCardProps) {
     const ResultToolView = getToolResultViewComponent(toolName)
     const permission = props.block.tool.permission
     const isAskUserQuestion = isAskUserQuestionToolName(toolName)
+    const isRequestUserInput = isRequestUserInputToolName(toolName)
+    const isQuestionTool = isAskUserQuestion || isRequestUserInput
     const showsPermissionFooter = Boolean(permission && (
         permission.status === 'pending'
         || ((permission.status === 'denied' || permission.status === 'canceled') && Boolean(permission.reason))
@@ -399,7 +376,7 @@ function ToolCardInner(props: ToolCardProps) {
                             <DialogTitle>{toolTitle}</DialogTitle>
                         </DialogHeader>
                         {(() => {
-                            const isAskUserQuestionWithAnswers = isAskUserQuestion
+                            const isQuestionToolWithAnswers = isQuestionTool
                                 && permission?.answers
                                 && Object.keys(permission.answers).length > 0
 
@@ -407,7 +384,7 @@ function ToolCardInner(props: ToolCardProps) {
                                 <div className="mt-3 flex max-h-[75vh] flex-col gap-4 overflow-auto">
                                     <div>
                                         <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">
-                                            {isAskUserQuestionWithAnswers ? 'Questions & Answers' : 'Input'}
+                                            {isQuestionToolWithAnswers ? t('tool.questionsAnswers') : t('tool.input')}
                                         </div>
                                         {FullToolView ? (
                                             <FullToolView block={props.block} metadata={props.metadata} />
@@ -415,9 +392,9 @@ function ToolCardInner(props: ToolCardProps) {
                                             renderToolInput(props.block)
                                         )}
                                     </div>
-                                    {!isAskUserQuestionWithAnswers && (
+                                    {!isQuestionToolWithAnswers && (
                                         <div>
-                                            <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">Result</div>
+                                            <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
                                             <ResultToolView block={props.block} metadata={props.metadata} />
                                         </div>
                                     )}
@@ -444,11 +421,11 @@ function ToolCardInner(props: ToolCardProps) {
                         ) : (
                             <div className="mt-3 flex flex-col gap-3">
                                 <div>
-                                    <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">Input</div>
+                                    <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.input')}</div>
                                     {renderToolInput(props.block)}
                                 </div>
                                 <div>
-                                    <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">Result</div>
+                                    <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
                                     <ResultToolView block={props.block} metadata={props.metadata} />
                                 </div>
                             </div>
@@ -457,6 +434,14 @@ function ToolCardInner(props: ToolCardProps) {
 
                     {isAskUserQuestion && permission?.status === 'pending' ? (
                         <AskUserQuestionFooter
+                            api={props.api}
+                            sessionId={props.sessionId}
+                            tool={props.block.tool}
+                            disabled={props.disabled}
+                            onDone={props.onDone}
+                        />
+                    ) : isRequestUserInput && permission?.status === 'pending' ? (
+                        <RequestUserInputFooter
                             api={props.api}
                             sessionId={props.sessionId}
                             tool={props.block.tool}

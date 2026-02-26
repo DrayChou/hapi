@@ -6,7 +6,11 @@
 **/.vitepress/cache/
 **/dist-exe/
 **/*.tsbuildinfo
-server/src/web/embeddedAssets.generated.ts
+hub/src/web/embeddedAssets.generated.ts
+
+# Downloaded tools (fetched at build time)
+hub/tools/tunwg/tunwg-*
+hub/tools/tunwg/*.exe
 
 # Env files (can contain secrets)
 **/.env
@@ -37,3 +41,6 @@ execplan/
 # Spec workflow
 .spec-workflow
 .lh
+
+# Generated npm bundle output (local)
+cli/npm/main/

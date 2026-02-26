@@ -5,9 +5,11 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { RouterProvider, createMemoryHistory } from '@tanstack/react-router'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
+import { initializeFontScale } from '@/hooks/useFontScale'
 import { getTelegramWebApp, isTelegramEnvironment, loadTelegramSdk } from './hooks/useTelegram'
 import { queryClient } from './lib/query-client'
 import { createAppRouter } from './router'
+import { I18nProvider } from './lib/i18n-context'
 
 function getStartParam(): string | null {
     const query = new URLSearchParams(window.location.search)
@@ -31,6 +33,8 @@ function getInitialPath(): string {
 }
 
 async function bootstrap() {
+    initializeFontScale()
+
     // Only load Telegram SDK in Telegram environment (with 3s timeout)
     const isTelegram = isTelegramEnvironment()
     if (isTelegram) {
@@ -65,10 +69,12 @@ async function bootstrap() {
 
     ReactDOM.createRoot(document.getElementById('root')!).render(
         <React.StrictMode>
-            <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
-                {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} /> : null}
-            </QueryClientProvider>
+            <I18nProvider>
+                <QueryClientProvider client={queryClient}>
+                    <RouterProvider router={router} />
+                    {import.meta.env.DEV ? <ReactQueryDevtools initialIsOpen={false} /> : null}
+                </QueryClientProvider>
+            </I18nProvider>
         </React.StrictMode>
     )
 }

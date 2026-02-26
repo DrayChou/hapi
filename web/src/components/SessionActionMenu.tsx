@@ -5,9 +5,9 @@ import {
     useLayoutEffect,
     useRef,
     useState,
-    type CSSProperties,
-    type RefObject
+    type CSSProperties
 } from 'react'
+import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
     isOpen: boolean
@@ -16,8 +16,7 @@ type SessionActionMenuProps = {
     onRename: () => void
     onArchive: () => void
     onDelete: () => void
-    anchorRef?: RefObject<HTMLElement | null>
-    align?: 'start' | 'end'
+    anchorPoint: { x: number; y: number }
     menuId?: string
 }
 
@@ -92,6 +91,7 @@ type MenuPosition = {
 }
 
 export function SessionActionMenu(props: SessionActionMenuProps) {
+    const { t } = useTranslation()
     const {
         isOpen,
         onClose,
@@ -99,8 +99,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onRename,
         onArchive,
         onDelete,
-        anchorRef,
-        align = 'end',
+        anchorPoint,
         menuId
     } = props
     const menuRef = useRef<HTMLDivElement | null>(null)
@@ -134,32 +133,19 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         const padding = 8
         const gap = 8
 
-        let top = (viewportHeight - menuRect.height) / 2
-        let left = (viewportWidth - menuRect.width) / 2
-        let transformOrigin = 'top center'
+        const spaceBelow = viewportHeight - anchorPoint.y
+        const spaceAbove = anchorPoint.y
+        const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
 
-        const anchorEl = anchorRef?.current
-        if (anchorEl) {
-            const anchorRect = anchorEl.getBoundingClientRect()
-            const spaceBelow = viewportHeight - anchorRect.bottom
-            const spaceAbove = anchorRect.top
-            const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
-
-            top = openAbove ? anchorRect.top - menuRect.height - gap : anchorRect.bottom + gap
-            if (align === 'start') {
-                left = anchorRect.left
-                transformOrigin = openAbove ? 'bottom left' : 'top left'
-            } else {
-                left = anchorRect.right - menuRect.width
-                transformOrigin = openAbove ? 'bottom right' : 'top right'
-            }
-        }
+        let top = openAbove ? anchorPoint.y - menuRect.height - gap : anchorPoint.y + gap
+        let left = anchorPoint.x - menuRect.width / 2
+        const transformOrigin = openAbove ? 'bottom center' : 'top center'
 
         top = Math.min(Math.max(top, padding), viewportHeight - menuRect.height - padding)
         left = Math.min(Math.max(left, padding), viewportWidth - menuRect.width - padding)
 
         setMenuPosition({ top, left, transformOrigin })
-    }, [align, anchorRef])
+    }, [anchorPoint])
 
     useLayoutEffect(() => {
         if (!isOpen) return
@@ -175,7 +161,6 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         const handlePointerDown = (event: PointerEvent) => {
             const target = event.target as Node
             if (menuRef.current?.contains(target)) return
-            if (anchorRef?.current?.contains(target)) return
             onClose()
         }
 
@@ -200,7 +185,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
             window.removeEventListener('resize', handleReflow)
             window.removeEventListener('scroll', handleReflow, true)
         }
-    }, [anchorRef, isOpen, onClose, updatePosition])
+    }, [isOpen, onClose, updatePosition])
 
     useEffect(() => {
         if (!isOpen) return
@@ -224,7 +209,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         : undefined
 
     const baseItemClassName =
-        'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
+        'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-base transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
 
     return (
         <div
@@ -236,7 +221,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                 id={headingId}
                 className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]"
             >
-                Session actions
+                {t('session.more')}
             </div>
             <div
                 id={resolvedMenuId}
@@ -251,7 +236,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                     onClick={handleRename}
                 >
                     <EditIcon className="text-[var(--app-hint)]" />
-                    Rename
+                    {t('session.action.rename')}
                 </button>
 
                 {sessionActive ? (
@@ -262,7 +247,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         onClick={handleArchive}
                     >
                         <ArchiveIcon className="text-red-500" />
-                        Archive
+                        {t('session.action.archive')}
                     </button>
                 ) : (
                     <button
@@ -272,7 +257,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
                         onClick={handleDelete}
                     >
                         <TrashIcon className="text-red-500" />
-                        Delete
+                        {t('session.action.delete')}
                     </button>
                 )}
             </div>

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Outlet, useLocation, useMatchRoute } from '@tanstack/react-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Outlet, useLocation, useMatchRoute, useRouter } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { getTelegramWebApp, isTelegramApp } from '@/hooks/useTelegram'
 import { initializeTheme } from '@/hooks/useTheme'
@@ -14,16 +14,23 @@ import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
 import { fetchLatestMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
+import { useTranslation } from '@/lib/use-translation'
+import { VoiceProvider } from '@/lib/voice-context'
+import { requireHubUrlForLogin } from '@/lib/runtime-config'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
 import { SyncingBanner } from '@/components/SyncingBanner'
+import { ReconnectingBanner } from '@/components/ReconnectingBanner'
+import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
+
+const REQUIRE_SERVER_URL = requireHubUrlForLogin()
 
 export function App() {
     return (
@@ -34,12 +41,14 @@ export function App() {
 }
 
 function AppInner() {
+    const { t } = useTranslation()
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
     const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
     const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
+    const router = useRouter()
     const { addToast } = useToast()
 
     useEffect(() => {
@@ -105,8 +114,9 @@ function AppInner() {
     }, [goBack, pathname])
     const queryClient = useQueryClient()
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId' })
-    const selectedSessionId = sessionMatch ? sessionMatch.sessionId : null
+    const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
     const { isSyncing, startSync, endSync } = useSyncingState()
+    const [sseDisconnected, setSseDisconnected] = useState(false)
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
@@ -122,6 +132,22 @@ function AppInner() {
         syncTokenRef.current = 0
         queryClient.clear()
     }, [baseUrl, queryClient])
+
+    // Clean up URL params after successful auth (for direct access links)
+    useEffect(() => {
+        if (!token || !api) return
+        const { pathname, search, hash, state } = router.history.location
+        const searchParams = new URLSearchParams(search)
+        if (!searchParams.has('server') && !searchParams.has('hub') && !searchParams.has('token')) {
+            return
+        }
+        searchParams.delete('server')
+        searchParams.delete('hub')
+        searchParams.delete('token')
+        const nextSearch = searchParams.toString()
+        const nextHref = `${pathname}${nextSearch ? `?${nextSearch}` : ''}${hash}`
+        router.history.replace(nextHref, state)
+    }, [token, api, router])
 
     useEffect(() => {
         if (!api || !token) {
@@ -153,6 +179,9 @@ function AppInner() {
     }, [api, isPushSupported, pushPermission, requestPermission, subscribe, token])
 
     const handleSseConnect = useCallback(() => {
+        // Clear disconnected state on successful connection
+        setSseDisconnected(false)
+
         // Increment token to track this specific connection
         const token = ++syncTokenRef.current
 
@@ -186,6 +215,13 @@ function AppInner() {
             })
     }, [api, queryClient, selectedSessionId, startSync, endSync])
 
+    const handleSseDisconnect = useCallback(() => {
+        // Only show reconnecting banner if we've already connected once
+        if (!isFirstConnectRef.current) {
+            setSseDisconnected(true)
+        }
+    }, [])
+
     const handleSseEvent = useCallback(() => {}, [])
     const handleToast = useCallback((event: ToastEvent) => {
         addToast({
@@ -209,6 +245,7 @@ function AppInner() {
         baseUrl,
         subscription: eventSubscription,
         onConnect: handleSseConnect,
+        onDisconnect: handleSseDisconnect,
         onEvent: handleSseEvent,
         onToast: handleToast
     })
@@ -223,7 +260,7 @@ function AppInner() {
     if (isAuthSourceLoading) {
         return (
             <div className="h-full flex items-center justify-center p-4">
-                <LoadingState label="Loading…" className="text-sm" />
+                <LoadingState label={t('loading')} className="text-sm" />
             </div>
         )
     }
@@ -237,6 +274,7 @@ function AppInner() {
                 serverUrl={serverUrl}
                 setServerUrl={setServerUrl}
                 clearServerUrl={clearServerUrl}
+                requireServerUrl={REQUIRE_SERVER_URL}
             />
         )
     }
@@ -250,6 +288,7 @@ function AppInner() {
                 serverUrl={serverUrl}
                 setServerUrl={setServerUrl}
                 clearServerUrl={clearServerUrl}
+                requireServerUrl={REQUIRE_SERVER_URL}
                 error={authError ?? undefined}
             />
         )
@@ -259,7 +298,7 @@ function AppInner() {
     if (isAuthLoading || (authSource && !token && !authError)) {
         return (
             <div className="h-full flex items-center justify-center p-4">
-                <LoadingState label="Authorizing…" className="text-sm" />
+                <LoadingState label={t('authorizing')} className="text-sm" />
             </div>
         )
     }
@@ -275,7 +314,8 @@ function AppInner() {
                     serverUrl={serverUrl}
                     setServerUrl={setServerUrl}
                     clearServerUrl={clearServerUrl}
-                    error={authError ?? 'Authentication failed'}
+                    requireServerUrl={REQUIRE_SERVER_URL}
+                    error={authError ?? t('login.error.authFailed')}
                 />
             )
         }
@@ -283,9 +323,9 @@ function AppInner() {
         // Telegram auth failed
         return (
             <div className="p-4 space-y-3">
-                <div className="text-base font-semibold">HAPI</div>
+                <div className="text-base font-semibold">{t('login.title')}</div>
                 <div className="text-sm text-red-600">
-                    {authError ?? 'Not authorized'}
+                    {authError ?? t('login.error.authFailed')}
                 </div>
                 <div className="text-xs text-[var(--app-hint)]">
                     Open this page from Telegram using the bot's "Open App" button (not "Open in browser").
@@ -295,14 +335,18 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token }}>
-            <SyncingBanner isSyncing={isSyncing} />
-            <OfflineBanner />
-            <div className="h-full flex flex-col">
-                <Outlet />
-            </div>
-            <ToastContainer />
-            <InstallPrompt />
+        <AppContextProvider value={{ api, token, baseUrl }}>
+            <VoiceProvider>
+                <SyncingBanner isSyncing={isSyncing} />
+                <ReconnectingBanner isReconnecting={sseDisconnected && !isSyncing} />
+                <VoiceErrorBanner />
+                <OfflineBanner />
+                <div className="h-full flex flex-col">
+                    <Outlet />
+                </div>
+                <ToastContainer />
+                <InstallPrompt />
+            </VoiceProvider>
         </AppContextProvider>
     )
 }

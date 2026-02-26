@@ -4,19 +4,9 @@ import type { SessionMetadataSummary } from '@/types/api'
 import type { ChatToolCall, ToolPermission } from '@/chat/types'
 import { usePlatform } from '@/hooks/usePlatform'
 import { Spinner } from '@/components/Spinner'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
-
-function getInputStringAny(input: unknown, keys: string[]): string | null {
-    if (!isObject(input)) return null
-    for (const key of keys) {
-        const value = input[key]
-        if (typeof value === 'string' && value.length > 0) return value
-    }
-    return null
-}
+import { isCodexFamilyFlavor } from '@/lib/agentFlavorUtils'
+import { getInputStringAny } from '@/lib/toolInputUtils'
+import { useTranslation } from '@/lib/use-translation'
 
 function isToolAllowedForSession(toolName: string, toolInput: unknown, allowedTools: string[] | undefined): boolean {
     if (!allowedTools || allowedTools.length === 0) return false
@@ -33,35 +23,35 @@ function isToolAllowedForSession(toolName: string, toolInput: unknown, allowedTo
 }
 
 function isCodexSession(metadata: SessionMetadataSummary | null, toolName: string): boolean {
-    return metadata?.flavor === 'codex'
-        || metadata?.flavor === 'gemini'
+    return isCodexFamilyFlavor(metadata?.flavor)
         || toolName.startsWith('Codex')
         || toolName.startsWith('Gemini')
+        || toolName.startsWith('OpenCode')
 }
 
-function formatPermissionSummary(permission: ToolPermission, toolName: string, toolInput: unknown, codex: boolean): string {
-    if (permission.status === 'pending') return 'Waiting for approval…'
-    if (permission.status === 'canceled') return permission.reason ? `Canceled: ${permission.reason}` : 'Canceled'
+function formatPermissionSummary(permission: ToolPermission, toolName: string, toolInput: unknown, codex: boolean, t: (key: string) => string): string {
+    if (permission.status === 'pending') return t('tool.waitingForApproval')
+    if (permission.status === 'canceled') return permission.reason ? `${t('tool.canceled')}: ${permission.reason}` : t('tool.canceled')
 
     if (codex) {
-        if (permission.status === 'approved' && permission.decision === 'approved_for_session') return 'Approved for session'
-        if (permission.status === 'approved') return 'Approved'
-        if (permission.status === 'denied' && permission.decision === 'abort') return permission.reason ? `Aborted: ${permission.reason}` : 'Aborted'
-        if (permission.status === 'denied') return permission.reason ? `Denied: ${permission.reason}` : 'Denied'
-        return 'Permission'
+        if (permission.status === 'approved' && permission.decision === 'approved_for_session') return t('tool.approvedForSession')
+        if (permission.status === 'approved') return t('tool.approved')
+        if (permission.status === 'denied' && permission.decision === 'abort') return permission.reason ? `${t('tool.aborted')}: ${permission.reason}` : t('tool.aborted')
+        if (permission.status === 'denied') return permission.reason ? `${t('tool.deny')}: ${permission.reason}` : t('tool.deny')
+        return t('tool.allow')
     }
 
     if (permission.status === 'approved') {
-        if (permission.mode === 'acceptEdits') return 'Approved: Allow all edits'
-        if (isToolAllowedForSession(toolName, toolInput, permission.allowedTools)) return 'Approved: Allow for session'
-        return 'Approved'
+        if (permission.mode === 'acceptEdits') return t('tool.approvedAllowAllEdits')
+        if (isToolAllowedForSession(toolName, toolInput, permission.allowedTools)) return t('tool.approvedForSession')
+        return t('tool.approved')
     }
 
     if (permission.status === 'denied') {
-        return permission.reason ? `Denied: ${permission.reason}` : 'Denied'
+        return permission.reason ? `${t('tool.deny')}: ${permission.reason}` : t('tool.deny')
     }
 
-    return 'Permission'
+    return t('tool.allow')
 }
 
 function PermissionRowButton(props: {
@@ -104,6 +94,7 @@ export function PermissionFooter(props: {
     disabled: boolean
     onDone: () => void
 }) {
+    const { t } = useTranslation()
     const { haptic } = usePlatform()
     const permission = props.tool.permission
     const [loading, setLoading] = useState<'allow' | 'deny' | 'abort' | null>(null)
@@ -115,7 +106,7 @@ export function PermissionFooter(props: {
 
     if (!permission) return null
 
-    const summary = formatPermissionSummary(permission, props.tool.name, props.tool.input, codex)
+    const summary = formatPermissionSummary(permission, props.tool.name, props.tool.input, codex, t)
     const isPending = permission.status === 'pending'
 
     const run = async (action: () => Promise<void>, hapticType: 'success' | 'error') => {
@@ -127,7 +118,7 @@ export function PermissionFooter(props: {
             props.onDone()
         } catch (e) {
             haptic.notification('error')
-            setError(e instanceof Error ? e.message : 'Request failed')
+            setError(e instanceof Error ? e.message : t('tool.requestFailed'))
         }
     }
 
@@ -223,21 +214,21 @@ export function PermissionFooter(props: {
                 {codex ? (
                     <>
                         <PermissionRowButton
-                            label="Yes"
+                            label={t('tool.yes')}
                             tone="allow"
                             loading={loading === 'allow'}
                             disabled={props.disabled || loading !== null || loadingForSession}
                             onClick={() => codexApprove('approved')}
                         />
                         <PermissionRowButton
-                            label="Yes for session"
+                            label={t('tool.yesForSession')}
                             tone="neutral"
                             loading={loadingForSession}
                             disabled={props.disabled || loading !== null || loadingForSession}
                             onClick={() => codexApprove('approved_for_session')}
                         />
                         <PermissionRowButton
-                            label="Abort"
+                            label={t('tool.abortLabel')}
                             tone="deny"
                             loading={loading === 'abort'}
                             disabled={props.disabled || loading !== null || loadingForSession}
@@ -247,7 +238,7 @@ export function PermissionFooter(props: {
                 ) : (
                     <>
                         <PermissionRowButton
-                            label="Allow"
+                            label={t('tool.allow')}
                             tone="allow"
                             loading={loading === 'allow'}
                             disabled={props.disabled || loading !== null || loadingAllEdits || loadingForSession}
@@ -255,7 +246,7 @@ export function PermissionFooter(props: {
                         />
                         {canAllowForSession ? (
                             <PermissionRowButton
-                                label="Allow for session"
+                                label={t('tool.allowForSession')}
                                 tone="neutral"
                                 loading={loadingForSession}
                                 disabled={props.disabled || loading !== null || loadingAllEdits || loadingForSession}
@@ -264,7 +255,7 @@ export function PermissionFooter(props: {
                         ) : null}
                         {canAllowAllEdits ? (
                             <PermissionRowButton
-                                label="Allow all edits"
+                                label={t('tool.allowAll')}
                                 tone="neutral"
                                 loading={loadingAllEdits}
                                 disabled={props.disabled || loading !== null || loadingAllEdits || loadingForSession}
@@ -272,7 +263,7 @@ export function PermissionFooter(props: {
                             />
                         ) : null}
                         <PermissionRowButton
-                            label="Deny"
+                            label={t('tool.deny')}
                             tone="deny"
                             loading={loading === 'deny'}
                             disabled={props.disabled || loading !== null || loadingAllEdits || loadingForSession}
